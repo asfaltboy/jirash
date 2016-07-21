@@ -26,6 +26,7 @@ import xmlrpclib
 import time
 import codecs
 import operator
+import subprocess
 import webbrowser
 import re
 import ssl
@@ -1034,6 +1035,14 @@ class JiraShell(cmdln.Cmdln):
         ${cmd_option_list}
         """
         changelog = self.jira.changelog(project, version)
+        versions = self.jira.versions(project,
+            exclude_archived=False, exclude_released=False)
+        ver = next(v for v in versions if v ['name'] == version)
+        release_date = ver.get('releaseDate', 'Unreleased')[:11].strip()
+        git_hash = subprocess.check_output(["git", "rev-parse", "HEAD"])[:7].strip()
+        title = '\n{ver} - {date} ({git_hash})'.format(
+            ver=version, date=release_date, git_hash=git_hash)
+        print(''.join([title, '\n', '-' * len(title), '\n'])) 
         for itype, issues in changelog.items():
             print('\n** %s' % itype)
             for issue in issues:
