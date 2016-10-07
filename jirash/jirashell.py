@@ -424,7 +424,7 @@ class Jira(object):
         if self.prefer_rest_api:
             query = []
             if project_keys:
-                query.append('PROJECT in (%s)' % ','.join(project_keys))
+                query.append('PROJECT in (%s)' % ','.join('"%s"' % p for p in project_keys))
             if terms:
                 query.append('text ~ "%s"' % terms)
             if fix_version:
