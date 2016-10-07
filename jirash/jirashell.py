@@ -30,6 +30,7 @@ import subprocess
 import webbrowser
 import re
 import ssl
+from collections import OrderedDict
 from datetime import datetime
 
 TOP = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -634,25 +635,32 @@ class Jira(object):
             log.debug("calling updateIssue(%r, %s)", key, json.dumps(data))
         return self.server.jira1.updateIssue(self.auth, key, data)
 
-    def latest_releases(self, limit_projects=None):
+    def latest_releases(self, limit_projects=None, only_latest=True):
         all_projects = self.projects()
         if limit_projects:
             projects = [p for p in all_projects if p['key'] in limit_projects]
         else:
             projects = all_projects
-        releases = {}
+        releases = OrderedDict()
         for p in projects:
             released = sorted((v for v in self.versions(p['key'])
                                if 'releaseDate' in v),
                               key=lambda v: v['releaseDate'])
+
             if not released:
                 continue
-            rel = released[-1]
-            rel['project'] = p['name']
-            rel['proj_key'] = p['key']
-            rel['url'] = ('%s/secure/ReleaseNote.jspa?projectId=%s&version='
-                          '%s') % (self.jira_url, p['id'], rel['id'])
-            releases[p['id']] = rel
+
+            if only_latest:
+                # skip all releases but the last
+                released = [released[-1]]
+
+            for rel in released:
+                rel['project'] = p['name']
+                rel['proj_key'] = p['key']
+                rel['url'] = ('%s/secure/ReleaseNote.jspa?projectId=%s&version='
+                              '%s') % (self.jira_url, p['id'], rel['id'])
+                releases[(p['id'], rel['id'])] = rel
+
         return releases
 
     def changelog(self, project, version):
@@ -1042,7 +1050,7 @@ class JiraShell(cmdln.Cmdln):
         git_hash = subprocess.check_output(["git", "rev-parse", "HEAD"])[:7].strip()
         title = '\n{ver} - {date} ({git_hash})'.format(
             ver=version, date=release_date, git_hash=git_hash)
-        print(''.join([title, '\n', '-' * len(title), '\n'])) 
+        print(''.join([title, '\n', '-' * len(title)]))
         for itype, issues in changelog.items():
             print('\n** %s' % itype)
             for issue in issues:
@@ -1258,45 +1266,44 @@ class JiraShell(cmdln.Cmdln):
                 rel['url'],
             )
 
-    @cmdln.option("-d", "--date", help="Specific release date")
+    @cmdln.option("-d", "--date", help="Specific release date",
+                  dest="dates", action="append",)
     def do_release_notes(self, subcmd, opts, *projects):
         """Get last release notes (html) for given (or all) projects. Must be
         given a date (default: today) or at least one project (default: all
         projects, for last release date).
 
         Usage:
-            ${cmd_name}
-            ${cmd_name} -d 2015-04-28
-            ${cmd_name} PROJECT ...
-            ${cmd_name} PROJECT ... -d 2015-04-28
+            ${cmd_name} PROJECT [...] [ -d 2015-04-28 [ -d ... ]]
+            ${cmd_name} [ PROJECT [...] ] -d 2015-04-28 [ -d ... ]
 
         ${cmd_option_list}
         """
         date_fmt = '%Y-%m-%d'
-        releases = self.jira.latest_releases(projects)
-        target_date = (
-            datetime.strptime(opts.date, date_fmt)
-            if opts.date
-            else datetime.today()
-        ).date()
+        releases = self.jira.latest_releases(projects, only_latest=False)
+        target_dates = [
+            (datetime.strptime(date, date_fmt) if date else
+             datetime.today()).date() for date in opts.dates
+        ]
         # log.debug("Raw releases fetched: %s", pprint(releases))
-        releases = dict([(k, r) for k, r in releases.items()
-                        if datetime.strptime(r['releaseDate'][:10],
-                        date_fmt).date() == target_date])
+        releases = [r for r in releases.values()
+                    if datetime.strptime(r['releaseDate'][:10],
+                    date_fmt).date() in target_dates]
         if not releases:
             raise JiraShellError(
                 "No releases found%s%s, please try again." % (
-                    target_date and ' on %s' % target_date or '',
+                    target_dates and ' on %s' % target_dates or '',
                     projects and (' for projects %s' %
                                   ' '.join(projects)) or ''))
 
         output = ""
-        for rel in releases.values():
+        for rel in releases:
             changelog = self.jira.changelog(rel["proj_key"], rel["name"])
             if not changelog:
                 print("No changelog found for %s %s" % (
                       rel["project"], rel["name"]))
-            output += '## %s %s\n' % (rel['project'], rel['name'])
+            output += '## %s %s (released %s)\n' % (
+                rel['project'], rel['name'], rel['releaseDate'][:10])
             for itype, issues in changelog.items():
                 output += '\n### %s' % itype
                 for issue in issues:
