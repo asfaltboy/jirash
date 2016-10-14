@@ -8,7 +8,7 @@ setup(
     author_email='pavel@izzysoftware.com',
     license="MIT",
     url='https://github.com/asfaltboy/jirash',
-    install_requires=['requests==2.1.0', 'soappy==0.12.5',
+    install_requires=['requests>=2.10.0', 'soappy==0.12.5',
                       'wstools==0.3', 'fpconst==0.7.2'],
     keywords="jira shell console client",
     packages=['jirash'],
